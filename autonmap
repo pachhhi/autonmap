@@ -1,0 +1,32 @@
+#!/bin/bash
+
+#Verificar si se paso un argumento
+
+if [ "$#" -ne 1 ] || [ "$(id -u)" -ne 0 ]; then
+	echo -e "\e[32m" ">Para que el script funcione debes ejecutar el script como sudo y agregarle la IP al final"
+	exit 1
+else
+	IP=$1
+
+	SCAN_FILE="scan.txt"
+
+	chmod 666 $SCAN_FILE
+
+	echo -e "\e[32m" ">Escaneando puertos abiertos"
+	
+	nmap -p- --open -T4 -sS -Pn $IP -oN $SCAN_FILE > /dev/null 2>&1
+
+	echo -e "\e[32m" ">Detectando servicios"
+
+	    PORTS=$(grep -oP '^\d+(?=/tcp)' $SCAN_FILE | tr '\n' ',' | sed 's/,$//')
+	
+	if [ -n "$PORTS" ];then
+		nmap -sC -sV -p "$PORTS" "$IP" -oN - >> $SCAN_FILE 2>/dev/null
+	else
+		echo -e "\e[32m" ">No se encontraron puertos"
+	fi
+fi 
+
+	
+
+
