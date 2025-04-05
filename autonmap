@@ -1,32 +1,94 @@
 #!/bin/bash
+figlet "pachhh" | lolcat
 
-#Verificar si se paso un argumento
+echo
+echo
+echo "Thanks for use my script, this is a simple tool thinked for work in TryHackMe, HackTheBox machines and any controlled environment, you can modify this script by your own necessities, you be free to do, thanks.
+github.com/pachhhi/autonmap" | lolcat
 
-if [ "$#" -ne 1 ] || [ "$(id -u)" -ne 0 ]; then
-	echo -e "\e[32m" ">Para que el script funcione debes ejecutar el script como sudo y agregarle la IP al final"
+echo " "
+
+#Colors
+RED="\033[31m"
+GREEN="\033[32m"
+RESET="\033[0m"
+
+echo -e "${GREEN}[*]> Init...${RESET}"
+
+#Variables
+IP=$1
+HPORTS="80,443,8080,8443,8000,8888,8081,8181,8880,8843,3128,8008,8010,8118,3130,5000,5001,3000,3001,4200,5500,2095,2096,2082,2083,2086,2087,2222,9000,9001,9443,9080,9444"
+DPORTS="53,443,853,8853,1053,2053,5350,5353,5355,10053,10153"
+LINE=$(printf '=%.0s' {1..50})
+
+#Make Files
+SCAN_FILE="scan.txt"
+
+#Verify arguments
+if [ "$#" -lt 1 ] || [ "$(id -u)" -ne 0 ]; then
+	echo -e "${RED}[*]> Execute this script with sudo and add the ip in the end.${RESET}"
 	exit 1
-else
-	IP=$1
+fi
 
-	SCAN_FILE="scan.txt"
+if [ -z "$IP" ]; then
+	echo -e "${RED}[*]> No IP provided${RESET}"		
+	exit 1
+fi
 
-	chmod 666 $SCAN_FILE
+#Remove scan file if exists
+if [ -e "$SCAN_FILE" ]; then
+	rm "$SCAN_FILE"
+	echo -e "${GREEN}[*]> Removed file: $SCAN_FILE ${RESET}"
+fi
 
-	echo -e "\e[32m" ">Escaneando puertos abiertos"
+#Create a new scan fileW
+touch "$SCAN_FILE"
+chmod 666 "$SCAN_FILE"
+
+#Start the scan
+echo -e "${GREEN}[*]> Starting scan on: ${IP} ${RESET}"
+nmap -sS -T4 --min-rate 5000 -p- --open -O "$IP" >> "$SCAN_FILE" &
+wait
+
+if [ -s "$SCAN_FILE" ]; then
+	PORTS=$(grep -oP '^\d+(?=/tcp)' "$SCAN_FILE" 2>/dev/null | tr '\n' ',')
+	echo -e "${GREEN}[*]> Detecting services for ports: "$PORTS" ${RESET}"
+
+	#Detecting services
+	if [ -n "$PORTS" ]; then
+		nmap -sV -sC -v -p"$PORTS" "$IP" >> "$SCAN_FILE"
+		
+		echo -e "${GREEN}[*]> Starting HTTP scan ${RESET}"
+		PORTS=$(echo "$PORTS" | tr ',' ' ')
 	
-	nmap -p- --open -T4 -sS -Pn $IP -oN $SCAN_FILE > /dev/null 2>&1
+		for p in $PORTS; do
 
-	echo -e "\e[32m" ">Detectando servicios"
-
-	    PORTS=$(grep -oP '^\d+(?=/tcp)' $SCAN_FILE | tr '\n' ',' | sed 's/,$//')
+			#Directories scan
+			if echo "$HPORTS" | grep -wq "$p"; then
+				echo -e "${GREEN}$LINE${RESET}"
+				echo -e "${GREEN}[*]> Waiting for directories in: $p ${RESET}"
 	
-	if [ -n "$PORTS" ];then
-		nmap -sC -sV -p "$PORTS" "$IP" -oN - >> $SCAN_FILE 2>/dev/null
+				echo -e "${GREEN}$LINE${RESET}"
+				gobuster dir -u http://$IP:$p/ -w "/home/pachhh/tool/SecLists/Discovery/Web-Content/common.txt" >> $SCAN_FILE	
+			fi
+	
+			#Subdirectories scan
+			if echo "$DPORTS" | grep -wq "$p"; then
+				gobuster dns -d http://$IP:$p/ -w "/home/pachhh/tool/SecLists/Discovery/DNS/subdomains-top1million-5000.txt" >> $SCAN_FILE 
+			
+
+			fi
+		done
+		
 	else
-		echo -e "\e[32m" ">No se encontraron puertos"
-	fi
-fi 
+		echo -e "${RED}[*]> Ports not detected ${RESET}"	
+	fi	
+else
+	echo -e "${GREEN}[*]> Scan file is empty. No results"
+fi
 
-	
-
+#TO DO 
+#For ports 80, 8080 is open, search directories and subdirectories
+#Enum DNS services if exists (port 53)
+#Enum LDAP services if default port exist
 
