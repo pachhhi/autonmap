@@ -11,18 +11,26 @@ echo " "
 #Colors
 RED="\033[31m"
 GREEN="\033[32m"
+BLUE="\033[34m"
 RESET="\033[0m"
 
-echo -e "${GREEN}[*]> Init...${RESET}"
 
 #Variables
 IP=$1
-HPORTS="80,443,8080,8443,8000,8888,8081,8181,8880,8843,3128,8008,8010,8118,3130,5000,5001,3000,3001,4200,5500,2095,2096,2082,2083,2086,2087,2222,9000,9001,9443,9080,9444"
+
+HPORTS="80,8080,8000,8888,3000,5000,81"
+HSPORTS="443,8443,9443,10443,4443,3443"
 DPORTS="53,443,853,8853,1053,2053,5350,5353,5355,10053,10153"
+SPORTS="137,138,139,445,901,1024,135,593,17500,3052"
+
 LINE=$(printf '=%.0s' {1..50})
 
 #Make Files
 SCAN_FILE="scan.txt"
+
+echo " "
+#echo -e "${BLUE}$LINE ${RESET}"
+echo -e "${GREEN}[*]> Init...${RESET}"
 
 #Verify arguments
 if [ "$#" -lt 1 ] || [ "$(id -u)" -ne 0 ]; then
@@ -38,26 +46,39 @@ fi
 #Remove scan file if exists
 if [ -e "$SCAN_FILE" ]; then
 	rm "$SCAN_FILE"
+
+	echo " "
 	echo -e "${GREEN}[*]> Removed file: $SCAN_FILE ${RESET}"
 fi
 
 #Create a new scan fileW
 touch "$SCAN_FILE"
 chmod 666 "$SCAN_FILE"
+TMPDIR=$(mktemp -d)
+
+trap "rm -rf \"$TMPDIR\"" EXIT
+
+TMPSCAN="$TMPDIR/fullscan.txt"
 
 #Start the scan
-echo -e "${GREEN}[*]> Starting scan on: ${IP} ${RESET}"
-nmap -sS -T4 --min-rate 5000 -p- --open -O "$IP" >> "$SCAN_FILE" &
+echo " "
+echo -e "${GREEN}[*]> Starting scan on: ${BLUE} ${IP} ${RESET}"
+nmap -sS -T4 --min-rate 5000 -p- --open -O "$IP" >> "$TMPSCAN" &
 wait
-
-if [ -s "$SCAN_FILE" ]; then
-	PORTS=$(grep -oP '^\d+(?=/tcp)' "$SCAN_FILE" 2>/dev/null | tr '\n' ',')
-	echo -e "${GREEN}[*]> Detecting services for ports: "$PORTS" ${RESET}"
+nmap -sU --top-ports 100 -v "$IP" >> $TMPSCAN &
+wait
+if [ -s "$TMPSCAN" ]; then
+	PORTS=$(grep -oP '^\d+(?=/tcp)' "$TMPSCAN" 2>/dev/null | tr '\n' ',')
+	
+	echo "${PORTS}" >> $SCAN_FILE
+	echo ""
+	echo -e "${GREEN}[*]> Detecting services for ports: ${BLUE} "$PORTS" ${RESET}"
 
 	#Detecting services
 	if [ -n "$PORTS" ]; then
-		nmap -sV -sC -v -p"$PORTS" "$IP" >> "$SCAN_FILE"
-		
+		nmap -sV -sC -Pn -p"$PORTS" "$IP" >> "$SCAN_FILE" &
+		wait
+		echo " "
 		echo -e "${GREEN}[*]> Starting HTTP scan ${RESET}"
 		PORTS=$(echo "$PORTS" | tr ',' ' ')
 	
@@ -65,30 +86,44 @@ if [ -s "$SCAN_FILE" ]; then
 
 			#Directories scan
 			if echo "$HPORTS" | grep -wq "$p"; then
-				echo -e "${GREEN}$LINE${RESET}"
-				echo -e "${GREEN}[*]> Waiting for directories in: $p ${RESET}"
+				echo " "
+				echo -e "${GREEN}[*]> Waiting for directories in: ${BLUE} $p ${RESET}"
 	
-				echo -e "${GREEN}$LINE${RESET}"
-				gobuster dir -u http://$IP:$p/ -w "/home/pachhh/tool/SecLists/Discovery/Web-Content/common.txt" >> $SCAN_FILE	
-			fi
-	
-			#Subdirectories scan
-			if echo "$DPORTS" | grep -wq "$p"; then
-				gobuster dns -d http://$IP:$p/ -w "/home/pachhh/tool/SecLists/Discovery/DNS/subdomains-top1million-5000.txt" >> $SCAN_FILE 
-			
+				gobuster dir -u http://$IP:$p/ -w "/home/pachhh/tool/SecLists/Discovery/Web-Content/common.txt" >> "$SCAN_FILE"
+				
 
+			fi
+
+			if echo "$HSPORTS" | grep -wq "$p"; then
+				echo " "
+				echo -e "${GREEN}[]> Waiting for directories in: $p ${RESET}"
+				gobuster dir -u https://$IP:$p/ -w "$HOME/tool/SecLists/Discovery/Web-Content-common.txt" >> "$SCAN_FILE"
+
+			fi
+
+			#DNS scan
+			if [[ ! "$IP" =~ ^10\. ]]; then
+				echo " "
+				echo -e "${GREEN}[*]> Starting DNS scan for: $p ${RESET}"
+				dig -x "${IP}" +short >> $SCAN_FILE
+			fi
+
+			#SMB Scan
+			if echo "SPORTS" | grep -wq "$p"; then
+				echo " "
+				echo -e "{$GREEN}[*]> Starting SMB scan${RESET}"
 			fi
 		done
 		
 	else
+		echo " "
 		echo -e "${RED}[*]> Ports not detected ${RESET}"	
 	fi	
 else
+	echo " "
 	echo -e "${GREEN}[*]> Scan file is empty. No results"
 fi
 
 #TO DO 
-#For ports 80, 8080 is open, search directories and subdirectories
-#Enum DNS services if exists (port 53)
 #Enum LDAP services if default port exist
-
+#Enum SMB protocol
