@@ -1,129 +1,72 @@
 #!/bin/bash
+
 figlet "pachhh" | lolcat
+echo ""
+echo -e "Thanks for using autonmap! Designed for TryHackMe, HackTheBox and labs." | lolcat
+echo ""
 
-echo
-echo
-echo "Thanks for use my script, this is a simple tool thinked for work in TryHackMe, HackTheBox machines and any controlled environment, you can modify this script by your own necessities, you be free to do, thanks.
-github.com/pachhhi/autonmap" | lolcat
-
-echo " "
-
-#Colors
+# Colors
 RED="\033[31m"
 GREEN="\033[32m"
 BLUE="\033[34m"
 RESET="\033[0m"
 
+# Argument check
+TARGET=$1
 
-#Variables
-IP=$1
-
-HPORTS="80,8080,8000,8888,3000,5000,81"
-HSPORTS="443,8443,9443,10443,4443,3443"
-DPORTS="53,443,853,8853,1053,2053,5350,5353,5355,10053,10153"
-SPORTS="137,138,139,445,901,1024,135,593,17500,3052"
-
-LINE=$(printf '=%.0s' {1..50})
-
-#Make Files
-SCAN_FILE="scan.txt"
-
-echo " "
-#echo -e "${BLUE}$LINE ${RESET}"
-echo -e "${GREEN}[*]> Init...${RESET}"
-
-#Verify arguments
-if [ "$#" -lt 1 ] || [ "$(id -u)" -ne 0 ]; then
-	echo -e "${RED}[*]> Execute this script with sudo and add the ip in the end.${RESET}"
-	exit 1
+if [ "$#" -lt 1 ]; then
+  echo -e "${RED}[!] Usage: $0 <IP or domain>${RESET}"
+  exit 1
 fi
 
-if [ -z "$IP" ]; then
-	echo -e "${RED}[*]> No IP provided${RESET}"		
-	exit 1
-fi
-
-#Remove scan file if exists
-if [ -e "$SCAN_FILE" ]; then
-	rm "$SCAN_FILE"
-
-	echo " "
-	echo -e "${GREEN}[*]> Removed file: $SCAN_FILE ${RESET}"
-fi
-
-#Create a new scan fileW
-touch "$SCAN_FILE"
-chmod 666 "$SCAN_FILE"
-TMPDIR=$(mktemp -d)
-
-trap "rm -rf \"$TMPDIR\"" EXIT
-
-TMPSCAN="$TMPDIR/fullscan.txt"
-
-#Start the scan
-echo " "
-echo -e "${GREEN}[*]> Starting scan on: ${BLUE} ${IP} ${RESET}"
-nmap -sS -T4 --min-rate 5000 -p- --open -O "$IP" >> "$TMPSCAN" &
-wait
-nmap -sU --top-ports 100 -v "$IP" >> $TMPSCAN &
-wait
-if [ -s "$TMPSCAN" ]; then
-	PORTS=$(grep -oP '^\d+(?=/tcp)' "$TMPSCAN" 2>/dev/null | tr '\n' ',')
-	
-	echo "${PORTS}" >> $SCAN_FILE
-	echo ""
-	echo -e "${GREEN}[*]> Detecting services for ports: ${BLUE} "$PORTS" ${RESET}"
-
-	#Detecting services
-	if [ -n "$PORTS" ]; then
-		nmap -sV -sC -Pn -p"$PORTS" "$IP" >> "$SCAN_FILE" &
-		wait
-		echo " "
-		echo -e "${GREEN}[*]> Starting HTTP scan ${RESET}"
-		PORTS=$(echo "$PORTS" | tr ',' ' ')
-	
-		for p in $PORTS; do
-
-			#Directories scan
-			if echo "$HPORTS" | grep -wq "$p"; then
-				echo " "
-				echo -e "${GREEN}[*]> Waiting for directories in: ${BLUE} $p ${RESET}"
-	
-				gobuster dir -u http://$IP:$p/ -w "/home/pachhh/tool/SecLists/Discovery/Web-Content/common.txt" >> "$SCAN_FILE"
-				
-
-			fi
-
-			if echo "$HSPORTS" | grep -wq "$p"; then
-				echo " "
-				echo -e "${GREEN}[]> Waiting for directories in: $p ${RESET}"
-				gobuster dir -u https://$IP:$p/ -w "$HOME/tool/SecLists/Discovery/Web-Content-common.txt" >> "$SCAN_FILE"
-
-			fi
-
-			#DNS scan
-			if [[ ! "$IP" =~ ^10\. ]]; then
-				echo " "
-				echo -e "${GREEN}[*]> Starting DNS scan for: $p ${RESET}"
-				dig -x "${IP}" +short >> $SCAN_FILE
-			fi
-
-			#SMB Scan
-			if echo "SPORTS" | grep -wq "$p"; then
-				echo " "
-				echo -e "{$GREEN}[*]> Starting SMB scan${RESET}"
-			fi
-		done
-		
-	else
-		echo " "
-		echo -e "${RED}[*]> Ports not detected ${RESET}"	
-	fi	
+# Resolve IP if domain is given
+if [[ "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  IP="$TARGET"
 else
-	echo " "
-	echo -e "${GREEN}[*]> Scan file is empty. No results"
+  IP=$(dig +short "$TARGET" | head -n1)
+  if [ -z "$IP" ]; then
+    echo -e "${RED}[!] Could not resolve domain: ${BLUE}$TARGET${RESET}"
+    exit 1
+  fi
+  echo -e "${GREEN}[*] Domain resolved to IP: ${BLUE}$IP${RESET}"
 fi
 
-#TO DO 
-#Enum LDAP services if default port exist
-#Enum SMB protocol
+# Create folder and scan files
+mkdir -p "$IP"
+SCAN_FILE="$IP/scan_$(date +%F_%H-%M).txt"
+TMPSCAN=$(mktemp)
+
+trap "rm -f $TMPSCAN" EXIT
+
+echo -e "${GREEN}[*] Starting full TCP scan on: ${BLUE} $IP...${RESET}"
+nmap -sS -T4 --min-rate 5000 -p- --open -O "$IP" >> "$TMPSCAN"
+echo -e "${GREEN}[*] Starting top 100 UDP scan...${RESET}"
+nmap -sU --top-ports 100 "$IP" >> "$TMPSCAN"
+
+if [ -s "$TMPSCAN" ]; then
+  PORTS=$(grep -oP '^\d+(?=/tcp)' "$TMPSCAN" | tr '\n' ',' | sed 's/,$//')
+  echo -e "${GREEN}[*] Open TCP ports: ${BLUE}$PORTS${RESET}"
+  echo "Open ports $PORTS" >> "$SCAN_FILE"
+  
+  echo -e "${GREEN}[*] Running version detection...${RESET}"
+  nmap -sV -sC -Pn -p"$PORTS" "$IP" >> "$SCAN_FILE"
+
+  echo -e "${GREEN}[*] Starting web enumeration...${RESET}"
+  PORT_LIST=$(echo "$PORTS" | tr ',' ' ')
+  
+  for p in $PORT_LIST; do
+    LINE=$(grep "$p/tcp" "$TMPSCAN" | awk '{print tolower($3)}')
+    if [[ "$LINE" == *"https"* || "$LINE" == *"ssl"* ]]; then
+        URL="https://$IP:$p"
+      else
+        URL="http://$IP:$p"
+    fi
+      echo -e "${GREEN}[*] Gobuster on: ${BLUE} $URL${RESET}"
+      echo -e "\n[+] Gobuster on: ${BLUE} $URL" >> "$SCAN_FILE"
+      gobuster dir -u "$URL" -w "/home/pachhh/tool/SecLists/Discovery/Web-Content/directory-list-2.3-medium.txt" >> "$SCAN_FILE" 2>&1
+  done
+else
+  echo -e "${RED}[!] No data collected from scans${RESET}"
+fi
+
+echo -e "${GREEN}[*] Scan complete. Output saved in: ${BLUE} ${SCAN_FILE}${RESET}"
